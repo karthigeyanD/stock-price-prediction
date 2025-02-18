@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stock Price Prediction</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -12,7 +13,7 @@
             background-color: #f5f5f5;
         }
         .container {
-            max-width: 600px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
             background-color: white;
@@ -72,6 +73,22 @@
             padding: 20px;
             border-radius: 5px;
         }
+        .prediction-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .prediction-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .chart-container {
+            margin-top: 30px;
+            height: 400px;
+        }
         .positive-change {
             color: green;
         }
@@ -90,7 +107,7 @@
         
         <div class="input-group">
             <label for="symbol">Stock Symbol:</label>
-            <input type="text" id="symbol" placeholder="e.g., AAPL, TSLA, MSFT">
+            <input type="text" id="symbol" placeholder="e.g., AAPL, RELIANCE.NS">
         </div>
 
         <div class="date-inputs">
@@ -107,62 +124,132 @@
         <button onclick="predictStock()">Predict</button>
 
         <div id="result"></div>
+        <div class="chart-container">
+            <canvas id="priceChart"></canvas>
+        </div>
     </div>
 
     <script>
-        // Set default dates
-        window.onload = function() {
+        let chart = null;
+
+        function onload() {
             const today = new Date();
-            const twoMonthsAgo = new Date();
-            twoMonthsAgo.setMonth(today.getMonth() - 2);
+            const lastWeek = new Date(today);
+            lastWeek.setDate(lastWeek.getDate() - 7);
             
             document.getElementById('end_date').value = today.toISOString().split('T')[0];
-            document.getElementById('start_date').value = twoMonthsAgo.toISOString().split('T')[0];
-        };
+            document.getElementById('start_date').value = lastWeek.toISOString().split('T')[0];
+        }
+
+        function formatChange(change) {
+            const sign = change >= 0 ? '+' : '';
+            const className = change >= 0 ? 'positive-change' : 'negative-change';
+            return `<span class="${className}">${sign}${change}%</span>`;
+        }
+
+        function updateChart(dates, prices) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            if (chart) {
+                chart.destroy();
+            }
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Stock Price',
+                        data: prices,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Historical Price Chart'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Price'
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         function predictStock() {
-            const symbol = document.getElementById("symbol").value;
-            const startDate = document.getElementById("start_date").value;
-            const endDate = document.getElementById("end_date").value;
+            const symbol = document.getElementById('symbol').value;
+            const start_date = document.getElementById('start_date').value;
+            const end_date = document.getElementById('end_date').value;
 
-            if (!symbol || !startDate || !endDate) {
-                document.getElementById("result").innerHTML = '<p class="error">Please fill in all fields</p>';
+            if (!symbol || !start_date || !end_date) {
+                document.getElementById('result').innerHTML = '<div class="error">Please fill in all fields</div>';
                 return;
             }
 
-            document.getElementById("result").innerHTML = "Loading...";
-            
-            fetch("/predict", {
-                method: "POST",
-                body: new URLSearchParams({ 
-                    symbol: symbol,
-                    start_date: startDate,
-                    end_date: endDate
-                }),
-                headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            const formData = new FormData();
+            formData.append('symbol', symbol);
+            formData.append('start_date', start_date);
+            formData.append('end_date', end_date);
+
+            fetch('/predict', {
+                method: 'POST',
+                body: formData
             })
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    document.getElementById("result").innerHTML = `<p class="error">${data.error}</p>`;
-                } else {
-                    const changeClass = data.predicted_change >= 0 ? 'positive-change' : 'negative-change';
-                    const changeSymbol = data.predicted_change >= 0 ? '▲' : '▼';
-                    
-                    document.getElementById("result").innerHTML = `
-                        <h2>${data.symbol}</h2>
-                        <p>Current Price: <b>$${data.current_price}</b></p>
-                        <p>Predicted Price: <b>$${data.predicted_price}</b></p>
-                        <p>Predicted Change: <b class="${changeClass}">${changeSymbol} ${Math.abs(data.predicted_change)}%</b></p>
-                        <p>Data Range: ${data.start_date} to ${data.end_date}</p>
+                    document.getElementById('result').innerHTML = `<div class="error">${data.error}</div>`;
+                    return;
+                }
+
+                const predictions = data.predictions;
+                let resultHTML = `
+                    <h2>${data.symbol}</h2>
+                    <p>Current Price: $${data.current_price}</p>
+                    <div class="prediction-grid">
+                `;
+
+                for (const [period, pred] of Object.entries(predictions)) {
+                    const periodName = period.replace(/_/g, ' ');
+                    resultHTML += `
+                        <div class="prediction-card">
+                            <h3>${periodName}</h3>
+                            <p>Price: $${pred.price}</p>
+                            <p>Change: ${formatChange(pred.change)}</p>
+                        </div>
                     `;
                 }
+
+                resultHTML += '</div>';
+                document.getElementById('result').innerHTML = resultHTML;
+
+                // Update chart with historical data
+                updateChart(data.historical_data.dates, data.historical_data.prices);
             })
             .catch(error => {
-                console.error("Error:", error);
-                document.getElementById("result").innerHTML = '<p class="error">Error occurred while fetching prediction</p>';
+                document.getElementById('result').innerHTML = `<div class="error">Error: ${error.message}</div>`;
             });
         }
+
+        onload();
     </script>
 </body>
 </html>
